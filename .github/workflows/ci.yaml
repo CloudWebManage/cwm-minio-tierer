@@ -9,6 +9,7 @@ permissions:
 
 env:
   GO_VERSION: "1.24.5"
+  IMAGE: ghcr.io/cloudwebmanage/cwm-minio-tierer
 
 jobs:
   ci:
@@ -21,5 +22,12 @@ jobs:
           cache: true
       - uses: CloudWebManage/cwm-iac/actions/docker-build-push@main
         with:
-          image_suffix: cwm-minio-tierer
           test_script: make validate
+          image_suffix: cwm-minio-tierer
+          deploy_key_b64: ${{ secrets.CWM_WORKER_CLUSTER_DEPLOY_KEY_B64 }}
+          deploy_file_path: config/auto-updated/cwm-minio-tierer/tierer.yaml
+          deploy_content_template: |
+            cwmMinioTierer:
+              tierer:
+                image: "__IMAGE__"
+          deploy_commit_message: "Update cwm-minio-tierer/tierer"
