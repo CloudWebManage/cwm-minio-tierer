@@ -1,0 +1,5 @@
+/.build/
+/bin/
+/coverage.out
+*.log
+.env

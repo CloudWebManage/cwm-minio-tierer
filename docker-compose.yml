@@ -1,0 +1,206 @@
+name: cwm-minio-tierer-integration
+
+x-app: &app
+  image: cwm-minio-tierer:integration
+  build:
+    context: .
+    target: runtime
+  restart: unless-stopped
+  read_only: true
+  user: "65532:65532"
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - private
+
+x-minio: &minio
+  image: minio/minio:RELEASE.2025-07-23T15-54-02Z@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+  command: ["server", "/data", "--console-address", ":9001"]
+  environment:
+    MINIO_ROOT_USER: integration-root
+    MINIO_ROOT_PASSWORD: integration-secret-key
+    # Fixture-only acceleration; production lifecycle timing remains external.
+    MINIO_SCANNER_SPEED: fastest
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+    interval: 2s
+    timeout: 2s
+    retries: 60
+    start_period: 5s
+  networks:
+    - private
+
+services:
+  redis:
+    image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - always
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - "60"
+      - "1"
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - private
+
+  minio-primary:
+    <<: *minio
+    volumes:
+      - minio-primary-data:/data
+    ports:
+      - "127.0.0.1:${PRIMARY_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${PRIMARY_MINIO_CONSOLE_PORT:-19001}:9001"
+
+  minio-low:
+    <<: *minio
+    volumes:
+      - minio-low-data:/data
+    ports:
+      - "127.0.0.1:${LOW_MINIO_PORT:-19002}:9000"
+      - "127.0.0.1:${LOW_MINIO_CONSOLE_PORT:-19003}:9001"
+
+  minio-bootstrap:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z@sha256:fb8f773eac8ef9d6da0486d5dec2f42f219358bcb8de579d1623d518c9ebd4cc
+    entrypoint: ["/bin/sh", "/fixtures/bootstrap.sh"]
+    environment:
+      PRIMARY_ENDPOINT: http://minio-primary:9000
+      LOW_ENDPOINT: http://minio-low:9000
+      MINIO_ROOT_USER: integration-root
+      MINIO_ROOT_PASSWORD: integration-secret-key
+      ILM_BUCKET: tierer-integration
+      LOW_BUCKET: tier-data
+      TIER_NAME: CWMLOW
+    volumes:
+      - ./integration:/fixtures:ro
+    depends_on:
+      minio-primary:
+        condition: service_healthy
+      minio-low:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - private
+
+  redis-updater:
+    <<: *app
+    command: ["/usr/local/bin/redis-updater"]
+    environment:
+      INSTANCE_ID: compose-integration
+      ACCESS_RETENTION: 72h
+      REDIS_ADDR: redis:6379
+      REDIS_OPERATION_TIMEOUT: 2s
+      UPDATER_LISTEN_ADDR: :8080
+      UPDATER_MAX_BODY_BYTES: "1048576"
+      UPDATER_MAX_RECORDS: "1000"
+      UPDATER_QUEUE_SIZE: "8"
+      UPDATER_BATCH_MAX_EVENTS: "5000"
+      UPDATER_BATCH_MAX_KEYS: "5000"
+      UPDATER_BATCH_MAX_WAIT: 10ms
+      UPDATER_READ_TIMEOUT: 5s
+      UPDATER_WRITE_TIMEOUT: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${UPDATER_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
+  tierer:
+    <<: *app
+    command: ["/usr/local/bin/minio-tierer"]
+    environment:
+      INSTANCE_ID: compose-integration
+      ACCESS_RETENTION: 72h
+      REDIS_ADDR: redis:6379
+      REDIS_OPERATION_TIMEOUT: 2s
+      MINIO_ENDPOINT: minio-primary:9000
+      MINIO_ACCESS_KEY: integration-root
+      MINIO_SECRET_KEY: integration-secret-key
+      MINIO_SECURE: "false"
+      MINIO_OPERATION_TIMEOUT: 10s
+      TIERER_MODE: audit
+      TIERER_LOW_THRESHOLD: "1"
+      TIERER_LOW_WINDOW_HOURS: "1"
+      TIERER_HIGH_THRESHOLD: "0"
+      TIERER_HIGH_WINDOW_HOURS: "1"
+      TIERER_RESTORE_DAYS: "1"
+      TIERER_COVERAGE_TEMPLATE: "cwm-minio-tierer:v1:compose-integration:coverage:g1:2006:01:02:15"
+      TIERER_COVERAGE_VALUE: complete:g1
+      TIERER_MARKER_KEY: cwm-tier
+      TIERER_MARKER_VALUE: low
+      TIERER_CHUNK_SIZE: "100"
+      TIERER_COMPLETION_DELAY: 10s
+      TIERER_RETRY_DELAY: 2s
+      TIERER_LISTEN_ADDR: :8081
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${TIERER_PORT:-18081}:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8081/readyz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
+  integration-tests:
+    profiles: ["tests"]
+    image: cwm-minio-tierer-integration-tests:local
+    build:
+      context: .
+      target: integration-tests
+    environment:
+      INTEGRATION_REDIS_ADDR: redis:6379
+      INTEGRATION_UPDATER_URL: http://redis-updater:8080
+      INTEGRATION_TIERER_URL: http://tierer:8081
+      INTEGRATION_MINIO_ENDPOINT: minio-primary:9000
+      INTEGRATION_MINIO_ACCESS_KEY: integration-root
+      INTEGRATION_MINIO_SECRET_KEY: integration-secret-key
+      INTEGRATION_MINIO_ILM: ${INTEGRATION_MINIO_ILM:-false}
+      INTEGRATION_MINIO_ILM_BUCKET: tierer-integration
+      INTEGRATION_MINIO_POLL_TIMEOUT: ${INTEGRATION_MINIO_POLL_TIMEOUT:-3m}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-updater:
+        condition: service_healthy
+      tierer:
+        condition: service_healthy
+      minio-bootstrap:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+networks:
+  private:
+    internal: true
+
+volumes:
+  redis-data:
+  minio-primary-data:
+  minio-low-data:

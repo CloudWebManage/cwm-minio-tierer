@@ -1,0 +1,11 @@
+.git
+.gitignore
+.build
+bin
+coverage.out
+*.log
+docs
+TODO.md
+README.md
+docker-compose.yml
+integration

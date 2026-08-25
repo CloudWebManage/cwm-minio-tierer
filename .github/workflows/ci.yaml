@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  GO_VERSION: "1.24.5"
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: CloudWebManage/cwm-iac/actions/docker-build-push@main
+        with:
+          image_suffix: cwm-minio-tierer
+          test_script: make validate
