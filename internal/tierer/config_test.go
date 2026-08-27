@@ -28,13 +28,31 @@ func TestLoadConfigDefaultsToAuditAndRequiresEvaluationContracts(t *testing.T) {
 	if config.MinIOOperationTimeout != 30*time.Second {
 		t.Fatalf("LoadConfig() MinIOOperationTimeout = %s, want 30s", config.MinIOOperationTimeout)
 	}
+	if !config.CoverageEnabled {
+		t.Fatal("LoadConfig() CoverageEnabled = false, want true default")
+	}
 	delete(env, "TIERER_COVERAGE_TEMPLATE")
 	if _, err := LoadConfig(mapLookup(env)); err == nil {
 		t.Fatal("LoadConfig() error = nil without coverage template")
 	}
 }
 
-func TestLoadConfigApplyRequiresExplicitPositiveBudgetsAndGate(t *testing.T) {
+func TestLoadConfigAllowsDisablingCoverageRecords(t *testing.T) {
+	t.Parallel()
+	env := validEnv()
+	env["TIERER_COVERAGE_ENABLED"] = "false"
+	delete(env, "TIERER_COVERAGE_TEMPLATE")
+	delete(env, "TIERER_COVERAGE_VALUE")
+	config, err := LoadConfig(mapLookup(env))
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if config.CoverageEnabled {
+		t.Fatal("LoadConfig() CoverageEnabled = true, want disabled")
+	}
+}
+
+func TestLoadConfigApplyDefaultsMissingBudgetsToUnlimitedAndRequiresGate(t *testing.T) {
 	t.Parallel()
 	env := validEnv()
 	env["TIERER_MODE"] = "apply"
@@ -42,15 +60,24 @@ func TestLoadConfigApplyRequiresExplicitPositiveBudgetsAndGate(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v, want apply gate", err)
 	}
 	env["TIERER_APPLY"] = "true"
-	if _, err := LoadConfig(mapLookup(env)); err == nil || !strings.Contains(err.Error(), "TIERER_DAILY_TRANSITION_ATTEMPTS") {
-		t.Fatalf("LoadConfig() error = %v, want missing budget", err)
+	config, err := LoadConfig(mapLookup(env))
+	if err != nil || !config.Apply {
+		t.Fatalf("LoadConfig() = %+v, %v, want apply", config, err)
+	}
+	if config.TransitionBudget != (BudgetLimit{}) || config.RestoreBudget != (BudgetLimit{}) {
+		t.Fatalf("LoadConfig() budgets = %+v %+v, want unlimited", config.TransitionBudget, config.RestoreBudget)
 	}
 	for _, key := range []string{"TIERER_DAILY_TRANSITION_ATTEMPTS", "TIERER_DAILY_TRANSITION_BYTES", "TIERER_DAILY_RESTORE_ATTEMPTS", "TIERER_DAILY_RESTORE_BYTES"} {
 		env[key] = "100"
 	}
-	config, err := LoadConfig(mapLookup(env))
+	config, err = LoadConfig(mapLookup(env))
 	if err != nil || !config.Apply {
 		t.Fatalf("LoadConfig() = %+v, %v, want apply", config, err)
+	}
+	env["TIERER_DAILY_RESTORE_BYTES"] = ""
+	config, err = LoadConfig(mapLookup(env))
+	if err != nil || config.RestoreBudget.Bytes != 0 {
+		t.Fatalf("LoadConfig() restore bytes = %d, %v, want unlimited", config.RestoreBudget.Bytes, err)
 	}
 	env["TIERER_DAILY_RESTORE_BYTES"] = "0"
 	if _, err := LoadConfig(mapLookup(env)); err == nil {

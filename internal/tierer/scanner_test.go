@@ -369,7 +369,7 @@ func TestScannerRealRedisBudgetTTLWrongTypeAndExhaustion(t *testing.T) {
 		server.SetTime(now)
 		client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 		t.Cleanup(func() { _ = client.Close() })
-		store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+		store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 		object := Object{Bucket: "data", Name: "one", ETag: "1", Size: 5, LastModified: now.Add(-2 * time.Hour), StateKnown: true}
 		inventory := newFakeInventory(map[string][]Object{"data": {object}})
 		config := ScannerConfig{Apply: true, Policy: Policy{LowThreshold: 1, LowWindowHours: 1, HighThreshold: 1, HighWindowHours: 1}, RestoreDays: 1, MarkerKey: "m", MarkerValue: "v", ChunkSize: 1, Scope: ScopeHash(nil, nil, "m", "v"), TransitionBudget: BudgetLimit{Attempts: 1, Bytes: 10}, RestoreBudget: BudgetLimit{Attempts: 1, Bytes: 10}}

@@ -116,14 +116,14 @@ func TestRealRedisCursorReadsAndAtomicBudgets(t *testing.T) {
 	defer cancel()
 	client := integrationRedis(t)
 	instance := "integration-" + uniqueToken(t)
-	store := tierer.NewRedisStore(tierer.NewRedisClient(client), instance, "coverage:g1:2006:01:02:15", "complete:g1")
+	store := tierer.NewRedisStore(tierer.NewRedisClient(client), instance, "coverage:g1:2006:01:02:15", "complete:g1", true)
 
 	scope := tierer.ScopeHash([]string{"excluded"}, []string{"tmp-"}, "cwm-tier", "low")
 	wantCursor := tierer.Cursor{Bucket: "integration", Object: "cursor/object", UpdatedAt: time.Now().UTC().Truncate(time.Second)}
 	if err := store.SaveCursor(ctx, scope, wantCursor); err != nil {
 		t.Fatalf("SaveCursor: %v", err)
 	}
-	reopened := tierer.NewRedisStore(tierer.NewRedisClient(client), instance, "coverage:g1:2006:01:02:15", "complete:g1")
+	reopened := tierer.NewRedisStore(tierer.NewRedisClient(client), instance, "coverage:g1:2006:01:02:15", "complete:g1", true)
 	gotCursor, err := reopened.LoadCursor(ctx, scope)
 	if err != nil || gotCursor == nil || gotCursor.Bucket != wantCursor.Bucket || gotCursor.Object != wantCursor.Object || !gotCursor.UpdatedAt.Equal(wantCursor.UpdatedAt) {
 		t.Fatalf("LoadCursor = %+v, %v; want %+v", gotCursor, err, wantCursor)

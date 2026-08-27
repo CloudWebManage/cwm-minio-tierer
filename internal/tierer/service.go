@@ -123,7 +123,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if err := ready.Ready(ctx); err != nil {
 		return err
 	}
-	store := NewRedisStore(redisClient, config.InstanceID, config.CoverageTemplate, config.CoverageValue)
+	store := NewRedisStore(redisClient, config.InstanceID, config.CoverageTemplate, config.CoverageValue, config.CoverageEnabled)
 	scope := ConfigScopeHash(config)
 	scanner := NewScanner(ScannerConfig{Apply: config.Apply, Policy: config.Policy, RestoreDays: config.RestoreDays, MarkerKey: config.MarkerKey, MarkerValue: config.MarkerValue, ChunkSize: config.ChunkSize, CompletionDelay: config.CompletionDelay, RetryDelay: config.RetryDelay, ExcludedBuckets: config.ExcludedBuckets, ExcludedPrefixes: config.ExcludedPrefixes, Scope: scope, TransitionBudget: config.TransitionBudget, RestoreBudget: config.RestoreBudget, OperationTimeout: config.MinIOOperationTimeout, Logger: logger}, minioAdapter, store, store, metrics, time.Now)
 	httpServer := &http.Server{Addr: config.ListenAddress, Handler: NewHTTPHandler(ready, metrics), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}

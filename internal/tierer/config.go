@@ -26,6 +26,7 @@ type Config struct {
 
 	CoverageTemplate string
 	CoverageValue    string
+	CoverageEnabled  bool
 	MarkerKey        string
 	MarkerValue      string
 
@@ -122,13 +123,18 @@ func LoadConfig(lookup envLookup) (Config, error) {
 		return Config{}, fmt.Errorf("ACCESS_RETENTION: %w", err)
 	}
 
-	c.CoverageTemplate = required(lookup, "TIERER_COVERAGE_TEMPLATE")
-	if err := contracts.ValidateCoverageTemplate(c.CoverageTemplate); err != nil {
-		return Config{}, fmt.Errorf("TIERER_COVERAGE_TEMPLATE: %w", err)
+	if c.CoverageEnabled, err = boolean(lookup, "TIERER_COVERAGE_ENABLED", true); err != nil {
+		return Config{}, err
 	}
-	c.CoverageValue = required(lookup, "TIERER_COVERAGE_VALUE")
-	if c.CoverageValue == "" {
-		return Config{}, errors.New("TIERER_COVERAGE_VALUE is required")
+	if c.CoverageEnabled {
+		c.CoverageTemplate = required(lookup, "TIERER_COVERAGE_TEMPLATE")
+		if err := contracts.ValidateCoverageTemplate(c.CoverageTemplate); err != nil {
+			return Config{}, fmt.Errorf("TIERER_COVERAGE_TEMPLATE: %w", err)
+		}
+		c.CoverageValue = required(lookup, "TIERER_COVERAGE_VALUE")
+		if c.CoverageValue == "" {
+			return Config{}, errors.New("TIERER_COVERAGE_VALUE is required")
+		}
 	}
 	c.MarkerKey = required(lookup, "TIERER_MARKER_KEY")
 	c.MarkerValue = required(lookup, "TIERER_MARKER_VALUE")
@@ -173,16 +179,16 @@ func LoadConfig(lookup envLookup) (Config, error) {
 	}
 
 	if c.Apply {
-		if c.TransitionBudget.Attempts, err = integer64(lookup, "TIERER_DAILY_TRANSITION_ATTEMPTS", 1, false); err != nil {
+		if c.TransitionBudget.Attempts, err = optionalInteger64(lookup, "TIERER_DAILY_TRANSITION_ATTEMPTS", 1); err != nil {
 			return Config{}, err
 		}
-		if c.TransitionBudget.Bytes, err = integer64(lookup, "TIERER_DAILY_TRANSITION_BYTES", 1, false); err != nil {
+		if c.TransitionBudget.Bytes, err = optionalInteger64(lookup, "TIERER_DAILY_TRANSITION_BYTES", 1); err != nil {
 			return Config{}, err
 		}
-		if c.RestoreBudget.Attempts, err = integer64(lookup, "TIERER_DAILY_RESTORE_ATTEMPTS", 1, false); err != nil {
+		if c.RestoreBudget.Attempts, err = optionalInteger64(lookup, "TIERER_DAILY_RESTORE_ATTEMPTS", 1); err != nil {
 			return Config{}, err
 		}
-		if c.RestoreBudget.Bytes, err = integer64(lookup, "TIERER_DAILY_RESTORE_BYTES", 1, false); err != nil {
+		if c.RestoreBudget.Bytes, err = optionalInteger64(lookup, "TIERER_DAILY_RESTORE_BYTES", 1); err != nil {
 			return Config{}, err
 		}
 	}
@@ -283,6 +289,18 @@ func integer64(lookup envLookup, key string, minimum int64, allowMissing bool) (
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value < minimum {
 		return 0, fmt.Errorf("%s must be an integer of at least %d", key, minimum)
+	}
+	return value, nil
+}
+
+func optionalInteger64(lookup envLookup, key string, minimum int64) (int64, error) {
+	raw, ok := lookup(key)
+	if !ok || raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < minimum {
+		return 0, fmt.Errorf("%s must be empty or an integer of at least %d", key, minimum)
 	}
 	return value, nil
 }

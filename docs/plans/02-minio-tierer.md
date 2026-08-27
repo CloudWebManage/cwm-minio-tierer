@@ -18,7 +18,7 @@
 ## Implemented Rulings
 
 - Audit is the default. Apply requires both `TIERER_MODE=apply` and
-  `TIERER_APPLY=true`, plus all four explicit positive daily limits. Audit may
+  `TIERER_APPLY=true`; daily limits are unlimited when unset or empty. Audit may
   perform MinIO reads needed to report intended outcomes, but never mutates
   MinIO or reserves budget.
 - Evaluation configuration is required in both modes so an audit exercises the

@@ -72,11 +72,13 @@ response. Exactly-once delivery and event IDs are not provided.
 
 ### Coverage
 
-Coverage records are written directly to Redis by an external authority, never
-by these executables. `TIERER_COVERAGE_TEMPLATE` is a Go time-format template
-that must produce a distinct key for every UTC hour; it should contain the
-instance ID and an audit filter/schema generation. A completed hour is covered
-only when that key contains exactly `TIERER_COVERAGE_VALUE` as a Redis string.
+Coverage records are enabled by default and written directly to Redis by an
+external authority, never by these executables. `TIERER_COVERAGE_TEMPLATE` is a
+Go time-format template that must produce a distinct key for every UTC hour; it
+should contain the instance ID and an audit filter/schema generation. A
+completed hour is covered only when that key contains exactly
+`TIERER_COVERAGE_VALUE` as a Redis string. When coverage is disabled, the tierer
+does not read coverage records and treats low-window coverage as complete.
 
 Publish coverage only after the producer has proven that all relevant audit
 records for the completed UTC hour were durably delivered and acknowledged.
@@ -195,8 +197,9 @@ across Redis batches.
 | `TIERER_HIGH_WINDOW_HOURS` | required | Positive whole hours `D`, maximum ten years. |
 | `TIERER_HIGH_INCLUDE_CURRENT` | `false` | Include current hour in the high window only. |
 | `TIERER_RESTORE_DAYS` | required | Positive MinIO calendar-day restore value `E`. |
-| `TIERER_COVERAGE_TEMPLATE` | required | Hour-varying Go time-format key template. |
-| `TIERER_COVERAGE_VALUE` | required | Exact non-empty complete value. |
+| `TIERER_COVERAGE_ENABLED` | `true` | When `false`, skip coverage-record reads and treat low-window coverage as complete. |
+| `TIERER_COVERAGE_TEMPLATE` | required when coverage enabled | Hour-varying Go time-format key template. |
+| `TIERER_COVERAGE_VALUE` | required when coverage enabled | Exact non-empty complete value. |
 | `TIERER_MARKER_KEY` | required | Reserved application tag key. |
 | `TIERER_MARKER_VALUE` | required | Required marker value and lifecycle filter value. |
 | `REDIS_ADDR` | `127.0.0.1:6379` | Standalone Redis `host:port`. |
@@ -210,10 +213,10 @@ across Redis batches.
 | `MINIO_SECURE` | `true` | Use HTTPS when true. |
 | `MINIO_REGION` | empty | Optional MinIO region. |
 | `MINIO_OPERATION_TIMEOUT` | `30s` | Per-operation timeout and listing inactivity timeout. |
-| `TIERER_DAILY_TRANSITION_ATTEMPTS` | apply required | Positive UTC daily marker-attempt limit. |
-| `TIERER_DAILY_TRANSITION_BYTES` | apply required | Positive UTC daily bytes represented by marker attempts. |
-| `TIERER_DAILY_RESTORE_ATTEMPTS` | apply required | Positive UTC daily initial/renewal restore-attempt limit. |
-| `TIERER_DAILY_RESTORE_BYTES` | apply required | Positive UTC daily bytes for initial restores; renewals charge zero bytes. |
+| `TIERER_DAILY_TRANSITION_ATTEMPTS` | unlimited | Empty or unset for unlimited; otherwise positive UTC daily marker-attempt limit. |
+| `TIERER_DAILY_TRANSITION_BYTES` | unlimited | Empty or unset for unlimited; otherwise positive UTC daily bytes represented by marker attempts. |
+| `TIERER_DAILY_RESTORE_ATTEMPTS` | unlimited | Empty or unset for unlimited; otherwise positive UTC daily initial/renewal restore-attempt limit. |
+| `TIERER_DAILY_RESTORE_BYTES` | unlimited | Empty or unset for unlimited; otherwise positive UTC daily bytes for initial restores; renewals charge zero bytes. |
 | `TIERER_EXCLUDE_BUCKETS` | empty | Exact comma-separated names; no blanks/whitespace/duplicates. |
 | `TIERER_EXCLUDE_BUCKET_PREFIXES` | empty | Exact comma-separated prefixes with the same syntax. |
 | `TIERER_CHUNK_SIZE` | `100` | Objects per work chunk; `chunk*(low+high)` may not exceed 10,000 Redis access keys. |
@@ -223,7 +226,8 @@ across Redis batches.
 | `TIERER_SHUTDOWN_TIMEOUT` | `30s` | Whole-service shutdown deadline. |
 
 Audit mode performs MinIO reads and reports decisions, but never mutates MinIO
-or reserves budgets. Apply mode requires all four explicit positive budgets.
+or reserves budgets. Apply-mode budgets are unlimited when unset or empty; set
+positive values to bound daily mutation attempts and represented bytes.
 
 ## Build and startup
 

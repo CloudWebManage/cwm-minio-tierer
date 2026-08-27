@@ -17,7 +17,7 @@ func TestRedisStoreReadsMissingAsZeroButRejectsMalformedAndWrongType(t *testing.
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	hours := []time.Time{
 		time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC),
 		time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC),
@@ -52,7 +52,7 @@ func TestRedisStoreCoverageRequiresExactConfiguredRecords(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete:g1")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete:g1", true)
 	hours := []time.Time{
 		time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC),
 		time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC),
@@ -75,13 +75,30 @@ func TestRedisStoreCoverageRequiresExactConfiguredRecords(t *testing.T) {
 	}
 }
 
+func TestRedisStoreDisabledCoverageReturnsCompleteWithoutRedisRead(t *testing.T) {
+	t.Parallel()
+	commands := &countingRedisCommands{}
+	store := NewRedisStore(commands, "site-a", "", "", false)
+	hours := []time.Time{
+		time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC),
+	}
+	covered, err := store.ReadCoverage(context.Background(), hours)
+	if err != nil {
+		t.Fatalf("ReadCoverage() error = %v", err)
+	}
+	if commands.evals != 0 || len(covered) != 2 || !covered[0] || !covered[1] {
+		t.Fatalf("ReadCoverage() evals=%d coverage=%v, want no Redis read and complete coverage", commands.evals, covered)
+	}
+}
+
 func TestRedisStoreReadsWholeChunkWithOneCountAndOneCoverageRequest(t *testing.T) {
 	t.Parallel()
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	commands := &countingRedisCommands{redisCommands: NewRedisClient(client)}
-	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete", true)
 	lowHours := []time.Time{time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC), time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)}
 	highHours := []time.Time{time.Date(2026, 8, 25, 14, 0, 0, 0, time.UTC)}
 	objects := []Object{{Bucket: "b", Name: "one"}, {Bucket: "b", Name: "two"}}
@@ -129,7 +146,7 @@ func TestRedisStoreReadChunkRejectsAggregateKeysBeforeRedisOrAllocation(t *testi
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	commands := &countingRedisCommands{redisCommands: NewRedisClient(client)}
-	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete", true)
 	objects := make([]Object, 101)
 	for i := range objects {
 		objects[i] = Object{Bucket: "bucket", Name: "object"}
@@ -151,7 +168,7 @@ func TestRedisStoreAtomicallyReservesDailyAttemptAndByteBudgets(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 23, 59, 0, 0, time.FixedZone("UTC-4", -4*60*60))
 	limit := BudgetLimit{Attempts: 1, Bytes: 10}
 
@@ -193,7 +210,7 @@ func TestRedisStoreRenewalReservesAttemptAndZeroBytesWithoutRefund(t *testing.T)
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC)
 	limit := BudgetLimit{Attempts: 2, Bytes: 5}
 	for i := 0; i < 2; i++ {
@@ -214,12 +231,36 @@ func TestRedisStoreRenewalReservesAttemptAndZeroBytesWithoutRefund(t *testing.T)
 	}
 }
 
+func TestRedisStoreAllowsUnlimitedBudgets(t *testing.T) {
+	t.Parallel()
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	commands := &countingRedisCommands{redisCommands: NewRedisClient(client)}
+	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete", true)
+	now := time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC)
+
+	reservation, err := store.Reserve(context.Background(), now, BudgetTransition, BudgetLimit{}, 100)
+	if err != nil || !reservation.Allowed || commands.evals != 0 {
+		t.Fatalf("unlimited Reserve() = %+v, %v, evals=%d", reservation, err, commands.evals)
+	}
+
+	reservation, err = store.Reserve(context.Background(), now, BudgetTransition, BudgetLimit{Attempts: 1}, 100)
+	if err != nil || !reservation.Allowed || commands.evals != 1 {
+		t.Fatalf("attempt-only Reserve() = %+v, %v, evals=%d", reservation, err, commands.evals)
+	}
+	reservation, err = store.Reserve(context.Background(), now, BudgetTransition, BudgetLimit{Attempts: 1}, 100)
+	if err != nil || reservation.Allowed {
+		t.Fatalf("second attempt-only Reserve() = %+v, %v, want exhausted", reservation, err)
+	}
+}
+
 func TestRedisStoreBudgetUsesExactInt64ArithmeticAndRejectsMalformedState(t *testing.T) {
 	t.Parallel()
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC)
 	attemptKey := "cwm-minio-tierer:v1:site-a:budget:2026:08:25:transition-attempts"
 	byteKey := "cwm-minio-tierer:v1:site-a:budget:2026:08:25:transition-bytes"
@@ -246,7 +287,7 @@ func TestRedisStorePersistsVersionedNamespacedSortedCursor(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete")
+	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	scope := ScopeHash([]string{"z", "a"}, []string{"tmp-"}, "marker", "value")
 	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
 	want := Cursor{Bucket: "b", Object: "a/z", UpdatedAt: now}
@@ -283,12 +324,13 @@ func TestConfigScopeHashChangesForActionAffectingConfiguration(t *testing.T) {
 	t.Parallel()
 	base := Config{
 		Apply: false, MinIOEndpoint: "minio-a:9000", Policy: Policy{LowThreshold: 1, LowWindowHours: 2, HighThreshold: 3, HighWindowHours: 4},
-		RestoreDays: 5, CoverageTemplate: "coverage:2006:01:02:15", CoverageValue: "complete", MarkerKey: "m", MarkerValue: "v", ChunkSize: 10,
+		RestoreDays: 5, CoverageTemplate: "coverage:2006:01:02:15", CoverageValue: "complete", CoverageEnabled: true, MarkerKey: "m", MarkerValue: "v", ChunkSize: 10,
 		TransitionBudget: BudgetLimit{Attempts: 11, Bytes: 12}, RestoreBudget: BudgetLimit{Attempts: 13, Bytes: 14},
 	}
 	wantDifferent := []Config{
 		func() Config { c := base; c.Apply = true; return c }(),
 		func() Config { c := base; c.MinIOEndpoint = "minio-b:9000"; return c }(),
+		func() Config { c := base; c.CoverageEnabled = false; return c }(),
 		func() Config { c := base; c.ChunkSize = 20; return c }(),
 		func() Config { c := base; c.RestoreBudget.Attempts = 99; return c }(),
 	}

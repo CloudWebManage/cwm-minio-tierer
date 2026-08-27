@@ -46,14 +46,17 @@ cwm-minio-tierer:v1:<instance>:cursor:<scope-hash>
 cwm-minio-tierer:v1:<instance>:budget:<YYYY>:<MM>:<DD>:<kind>
 ```
 
-Coverage records are external and use a required configurable Go time-format
-template plus exact expected value. The template MUST vary by UTC hour and
-SHOULD include the instance ID and external filter/schema generation.
+Coverage records are external and enabled by default. When enabled, they use a
+required configurable Go time-format template plus exact expected value. The
+template MUST vary by UTC hour and SHOULD include the instance ID and external
+filter/schema generation. When coverage is disabled, low-window coverage is
+treated as complete and no coverage keys are read.
 
 Counters use absolute expiry derived from the end of their UTC hour. Counter
 retention is configurable and MUST exceed `max(B,D)+1h`. Missing access keys
-equal zero only when all required low-window coverage records match. Wrong
-types, negative values, malformed integers, and overflow are errors.
+equal zero only when coverage is disabled or all required low-window coverage
+records match. Wrong types, negative values, malformed integers, and overflow
+are errors.
 
 Redis MUST be configured with persistence and `noeviction` for apply mode.
 Lossy Redis recovery invalidates coverage externally. Redis durability beyond
@@ -172,7 +175,8 @@ MinIO calendar-day/UTC-midnight semantics, not exactly `E*24h`.
 ## Audit Mode And Budgets
 
 Audit mode is the default and performs no MinIO mutation or budget reservation.
-Apply mode requires explicit positive UTC daily limits for:
+Apply-mode budgets are unlimited when unset or empty. When set, they MUST be
+positive UTC daily limits for:
 
 - transition attempts;
 - transition bytes;
@@ -180,8 +184,9 @@ Apply mode requires explicit positive UTC daily limits for:
 - initial restore bytes.
 
 The tierer atomically checks and reserves count and bytes in Redis before a
-MinIO mutation. Reservations are never refunded after failures, ambiguous
-results, or crashes. Budgets limit attempts, not confirmed outcomes.
+MinIO mutation when at least one limit for that budget kind is set. Reservations
+are never refunded after failures, ambiguous results, or crashes. Budgets limit
+attempts, not confirmed outcomes.
 
 ## Observability And Operations
 

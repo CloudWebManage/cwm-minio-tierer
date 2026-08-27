@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -53,10 +54,11 @@ type RedisStore struct {
 	instance         string
 	coverageTemplate string
 	coverageValue    string
+	coverageEnabled  bool
 }
 
-func NewRedisStore(client redisCommands, instance, coverageTemplate, coverageValue string) *RedisStore {
-	return &RedisStore{client: client, instance: instance, coverageTemplate: coverageTemplate, coverageValue: coverageValue}
+func NewRedisStore(client redisCommands, instance, coverageTemplate, coverageValue string, coverageEnabled bool) *RedisStore {
+	return &RedisStore{client: client, instance: instance, coverageTemplate: coverageTemplate, coverageValue: coverageValue, coverageEnabled: coverageEnabled}
 }
 
 func accessKey(instance, bucket, object string, hour time.Time) (string, error) {
@@ -101,6 +103,13 @@ func (s *RedisStore) ReadCounts(ctx context.Context, bucket, object string, hour
 func (s *RedisStore) ReadCoverage(ctx context.Context, hours []time.Time) ([]bool, error) {
 	if len(hours) == 0 {
 		return nil, errors.New("coverage window must not be empty")
+	}
+	if !s.coverageEnabled {
+		covered := make([]bool, len(hours))
+		for i := range covered {
+			covered[i] = true
+		}
+		return covered, nil
 	}
 	keys := make([]string, len(hours))
 	for i, hour := range hours {
@@ -209,14 +218,25 @@ func (s *RedisStore) Reserve(ctx context.Context, now time.Time, kind BudgetKind
 	if kind != BudgetTransition && kind != BudgetRestore {
 		return BudgetReservation{}, errors.New("invalid budget kind")
 	}
-	if limit.Attempts <= 0 || limit.Bytes <= 0 || bytes < 0 {
+	if limit.Attempts < 0 || limit.Bytes < 0 || bytes < 0 {
 		return BudgetReservation{}, errors.New("invalid budget reservation")
+	}
+	if limit.Attempts == 0 && limit.Bytes == 0 {
+		return BudgetReservation{Allowed: true}, nil
+	}
+	attemptLimit := limit.Attempts
+	if attemptLimit == 0 {
+		attemptLimit = math.MaxInt64
+	}
+	byteLimit := limit.Bytes
+	if byteLimit == 0 {
+		byteLimit = math.MaxInt64
 	}
 	day := now.UTC().Format("2006:01:02")
 	prefix := fmt.Sprintf("%s:%s:budget:%s:%s", contracts.Namespace, s.instance, day, kind)
 	keys := []string{prefix + "-attempts", prefix + "-bytes"}
 	expires := now.UTC().Truncate(24 * time.Hour).Add(72 * time.Hour).Unix()
-	raw, err := s.client.Eval(ctx, reserveBudgetScript, keys, limit.Attempts, limit.Bytes, bytes, expires)
+	raw, err := s.client.Eval(ctx, reserveBudgetScript, keys, attemptLimit, byteLimit, bytes, expires)
 	if err != nil {
 		return BudgetReservation{}, fmt.Errorf("reserve %s budget: %w", kind, err)
 	}
@@ -279,6 +299,7 @@ func ConfigScopeHash(config Config) string {
 		RestoreDays      int         `json:"restore_days"`
 		CoverageTemplate string      `json:"coverage_template"`
 		CoverageValue    string      `json:"coverage_value"`
+		CoverageEnabled  bool        `json:"coverage_enabled"`
 		MarkerKey        string      `json:"marker_key"`
 		MarkerValue      string      `json:"marker_value"`
 		TransitionBudget BudgetLimit `json:"transition_budget"`
@@ -286,7 +307,7 @@ func ConfigScopeHash(config Config) string {
 		ChunkSize        int         `json:"chunk_size"`
 		ExcludedBuckets  []string    `json:"excluded_buckets"`
 		ExcludedPrefixes []string    `json:"excluded_prefixes"`
-	}{1, config.Apply, config.MinIOEndpoint, config.Policy, config.RestoreDays, config.CoverageTemplate, config.CoverageValue, config.MarkerKey, config.MarkerValue, config.TransitionBudget, config.RestoreBudget, config.ChunkSize, buckets, prefixes})
+	}{1, config.Apply, config.MinIOEndpoint, config.Policy, config.RestoreDays, config.CoverageTemplate, config.CoverageValue, config.CoverageEnabled, config.MarkerKey, config.MarkerValue, config.TransitionBudget, config.RestoreBudget, config.ChunkSize, buckets, prefixes})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

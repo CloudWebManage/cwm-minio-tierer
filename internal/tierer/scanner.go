@@ -207,8 +207,8 @@ func (s *Scanner) validate() error {
 	if s.config.ChunkSize <= 0 || s.config.Policy.LowWindowHours <= 0 || s.config.Policy.HighWindowHours <= 0 || s.config.RestoreDays <= 0 || s.config.MarkerKey == "" || s.config.MarkerValue == "" || s.config.Scope == "" {
 		return errors.New("invalid scanner configuration")
 	}
-	if s.config.Apply && (s.config.TransitionBudget.Attempts <= 0 || s.config.TransitionBudget.Bytes <= 0 || s.config.RestoreBudget.Attempts <= 0 || s.config.RestoreBudget.Bytes <= 0) {
-		return errors.New("apply scanner requires positive budgets")
+	if s.config.Apply && (s.config.TransitionBudget.Attempts < 0 || s.config.TransitionBudget.Bytes < 0 || s.config.RestoreBudget.Attempts < 0 || s.config.RestoreBudget.Bytes < 0) {
+		return errors.New("apply scanner budgets must be non-negative")
 	}
 	if err := validateAggregateAccessKeys(s.config.ChunkSize, s.config.Policy.LowWindowHours, s.config.Policy.HighWindowHours, maxRedisAccessKeysPerChunk); err != nil {
 		return err
