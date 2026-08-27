@@ -318,6 +318,7 @@ func (s *Scanner) processChunk(ctx context.Context, objects []Object) error {
 		return err
 	}
 	evaluated := make([]evaluatedObject, 0, len(objects))
+	readStarted := time.Now()
 	opCtx, cancel := s.operationContext(ctx)
 	chunkUsage, coverage, err := s.usage.ReadChunk(opCtx, objects, lowHours, highHours)
 	cancel()
@@ -328,6 +329,7 @@ func (s *Scanner) processChunk(ctx context.Context, objects []Object) error {
 	if len(chunkUsage) != len(objects) {
 		return errors.New("chunk usage response does not match object count")
 	}
+	s.logger.Debug("tierer chunk usage read", "operation", "chunk", "objects", len(objects), "evaluation_hour", evaluationHour, "low_window_hours", len(lowHours), "high_window_hours", len(highHours), "coverage_complete", allCovered(coverage), "duration", time.Since(readStarted))
 	for i, object := range objects {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -384,6 +386,9 @@ func (s *Scanner) handleObject(ctx context.Context, listed Object, result Result
 		state = current.State
 		action = DecideAction(state, result.Low, result.High, chunkNow)
 	}
+	if action != ActionNone {
+		s.logger.Debug("tierer mutation decision", "operation", "mutation_decision", "bucket", listed.Bucket, "object", listed.Name, "action", action, "low", result.Low, "high", result.High, "transitioned", state.Transitioned, "state_known", listed.StateKnown, "apply", s.config.Apply)
+	}
 	s.observer.TransitionState(state.Transitioned)
 	switch action {
 	case ActionNone:
@@ -425,6 +430,7 @@ func (s *Scanner) handleMarker(ctx context.Context, object Object) error {
 		return err
 	}
 	s.observer.BudgetObserved(BudgetTransition, reservation)
+	s.logger.Debug("tierer budget decision", "operation", "budget_decision", "bucket", object.Bucket, "object", object.Name, "kind", BudgetTransition, "allowed", reservation.Allowed, "used_attempts", reservation.UsedAttempts, "used_bytes", reservation.UsedBytes, "limit_attempts", s.config.TransitionBudget.Attempts, "limit_bytes", s.config.TransitionBudget.Bytes)
 	if !reservation.Allowed {
 		s.observer.BudgetExhausted(BudgetTransition)
 		s.observer.ObjectHandled("transition_budget_exhausted")
@@ -462,6 +468,7 @@ func (s *Scanner) handleRestore(ctx context.Context, object Object, action Actio
 		return err
 	}
 	s.observer.BudgetObserved(BudgetRestore, reservation)
+	s.logger.Debug("tierer budget decision", "operation", "budget_decision", "bucket", object.Bucket, "object", object.Name, "kind", BudgetRestore, "allowed", reservation.Allowed, "used_attempts", reservation.UsedAttempts, "used_bytes", reservation.UsedBytes, "limit_attempts", s.config.RestoreBudget.Attempts, "limit_bytes", s.config.RestoreBudget.Bytes)
 	if !reservation.Allowed {
 		s.observer.BudgetExhausted(BudgetRestore)
 		s.observer.ObjectHandled("restore_budget_exhausted")
@@ -483,6 +490,15 @@ func (s *Scanner) handleRestore(ctx context.Context, object Object, action Actio
 		s.observer.ObjectHandled(string(action))
 	}
 	return nil
+}
+
+func allCovered(coverage []bool) bool {
+	for _, covered := range coverage {
+		if !covered {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Scanner) dependencyError(ctx context.Context, dependency, operation, bucket, object string, err error) {

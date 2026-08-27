@@ -1,9 +1,12 @@
 package updater
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,6 +39,23 @@ func TestBatcherCombinesRequestsAndAggregatesDuplicateKeys(t *testing.T) {
 	}
 	if len(batches[0]) != 2 || batches[0][0].Key != "a" || batches[0][0].Delta != 3 || batches[0][1].Key != "b" {
 		t.Fatalf("aggregated batch = %#v", batches[0])
+	}
+}
+
+func TestBatcherDebugLogsBatchFlush(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	batcher := NewBatcher(BatcherConfig{QueueSize: 1, MaxEvents: 1, MaxKeys: 1, MaxWait: time.Hour, OperationTimeout: time.Second, Logger: logger}, &recordingStore{}, nil)
+	batcher.Start()
+	t.Cleanup(func() { _ = batcher.Stop(context.Background()) })
+
+	if err := batcher.Submit(context.Background(), BatchRequest{Events: 1, Increments: testIncrement("a")}); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	text := output.String()
+	if !strings.Contains(text, `"operation":"batch_flush"`) || !strings.Contains(text, `"records":1`) || !strings.Contains(text, `"keys":1`) {
+		t.Fatalf("debug batch log = %s", text)
 	}
 }
 

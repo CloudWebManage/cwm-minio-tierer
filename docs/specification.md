@@ -191,8 +191,10 @@ attempts, not confirmed outcomes.
 ## Observability And Operations
 
 Both processes provide structured logs, `/livez`, `/readyz`, and Prometheus
-`/metrics`. Metrics MUST avoid bucket/object labels. Required signals include
-HTTP records and rejections, queue depth, batch size/latency/errors, risk
+`/metrics`. `LOG_LEVEL` controls structured log verbosity and defaults to
+`info`; debug logging includes updater batch flushes plus tierer chunk reads,
+mutation decisions, and budget decisions. Metrics MUST avoid bucket/object
+labels. Required signals include HTTP records and rejections, queue depth, batch size/latency/errors, risk
 overrides, Redis failures, scan progress and duration, coverage skips, cursor
 age/errors, budget use/exhaustion, marker outcomes, transitioned state,
 restore starts/renewals/errors, and last successful operation times.

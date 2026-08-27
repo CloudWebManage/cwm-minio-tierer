@@ -90,6 +90,27 @@ func TestScannerApplyReservesBeforeMarkerAndChargesRestoreRenewalZeroBytes(t *te
 	}
 }
 
+func TestScannerDebugLogsChunkAndMutationDecision(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	object := Object{Bucket: "data", Name: "one", ETag: "1", Size: 11, LastModified: now.Add(-2 * time.Hour), StateKnown: true}
+	minio := newFakeInventory(map[string][]Object{"data": {object}})
+	scanner := NewScanner(ScannerConfig{Policy: Policy{LowThreshold: 1, LowWindowHours: 1, HighThreshold: 1, HighWindowHours: 1}, RestoreDays: 1, MarkerKey: "m", MarkerValue: "v", ChunkSize: 1, Scope: "scope", Logger: logger}, minio, &fakeUsage{low: []int64{0}, coverage: []bool{true}, high: []int64{0}}, &fakeStateStore{}, NopObserver{}, func() time.Time { return now })
+
+	if err := scanner.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("ScanOnce() error = %v", err)
+	}
+	text := logs.String()
+	if !strings.Contains(text, `"operation":"chunk"`) || !strings.Contains(text, `"objects":1`) || !strings.Contains(text, `"coverage_complete":true`) {
+		t.Fatalf("chunk debug log = %s", text)
+	}
+	if !strings.Contains(text, `"operation":"mutation_decision"`) || !strings.Contains(text, `"action":"mark"`) || !strings.Contains(text, `"apply":false`) {
+		t.Fatalf("mutation decision debug log = %s", text)
+	}
+}
+
 func TestScannerSkipsChangedIdentityBeforeActionWithoutBudget(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)

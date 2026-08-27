@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -35,6 +36,7 @@ type BatcherConfig struct {
 	MaxKeys          int
 	MaxWait          time.Duration
 	OperationTimeout time.Duration
+	Logger           *slog.Logger
 }
 
 type BatchRequest struct {
@@ -46,6 +48,7 @@ type Batcher struct {
 	config   BatcherConfig
 	store    CounterStore
 	observer BatchObserver
+	logger   *slog.Logger
 
 	queue     chan *batchJob
 	stop      chan struct{}
@@ -78,6 +81,7 @@ func NewBatcher(config BatcherConfig, store CounterStore, observer BatchObserver
 		config:    config,
 		store:     store,
 		observer:  observer,
+		logger:    config.Logger,
 		queue:     make(chan *batchJob, config.QueueSize),
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
@@ -348,8 +352,12 @@ func (b *Batcher) flush(batch *pendingBatch) {
 	ctx, cancel := context.WithTimeout(b.runCtx, b.config.OperationTimeout)
 	err := b.store.Apply(ctx, increments)
 	cancel()
+	duration := time.Since(started)
+	if b.logger != nil {
+		b.logger.Debug("updater batch flushed", "operation", "batch_flush", "records", batch.events, "keys", len(increments), "duration", duration, "error", err)
+	}
 	if b.observer != nil {
-		b.observer.ObserveBatch(batch.events, len(increments), time.Since(started), err)
+		b.observer.ObserveBatch(batch.events, len(increments), duration, err)
 	}
 	b.resolve(batch.jobs, err)
 }

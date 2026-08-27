@@ -72,6 +72,7 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 		MaxKeys:          config.BatchMaxKeys,
 		MaxWait:          config.BatchMaxWait,
 		OperationTimeout: config.RedisOperationTimeout,
+		Logger:           logger,
 	}, store, metrics)
 	handler := NewHTTPHandler(config, batcher, client, metrics, time.Now, logger)
 	server := NewHTTPServer(config, handler)

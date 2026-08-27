@@ -154,6 +154,7 @@ exactly `true` or `false`.
 |---|---|---|
 | `INSTANCE_ID` | required | Stable ASCII letters/digits/dot/underscore/hyphen; namespaces all state. |
 | `ACCESS_RETENTION` | required | Positive whole-second duration; operationally greater than `max(low,high)+1h`. |
+| `LOG_LEVEL` | `info` | Shared structured log level: exactly `debug`, `info`, `warn`, or `error`. |
 | `UPDATER_LISTEN_ADDR` | `:8080` | HTTP listen `host:port`. |
 | `REDIS_ADDR` | `127.0.0.1:6379` | Standalone Redis `host:port`. |
 | `REDIS_USERNAME` | empty | Optional Redis ACL username. |
@@ -189,6 +190,7 @@ across Redis batches.
 |---|---|---|
 | `INSTANCE_ID` | required | Same stable namespace as the updater. |
 | `ACCESS_RETENTION` | required | Positive whole-second duration exceeding the longest window plus 1h. |
+| `LOG_LEVEL` | `info` | Shared structured log level: exactly `debug`, `info`, `warn`, or `error`. |
 | `TIERER_MODE` | `audit` | Exactly `audit` or `apply`. |
 | `TIERER_APPLY` | `false` | Must be `true` in addition to `TIERER_MODE=apply`. |
 | `TIERER_LOW_THRESHOLD` | required | Non-negative integer `A`; low when completed-window sum is `< A`. |
@@ -282,7 +284,9 @@ developer machine. Do not reuse them. Redis has no host port.
 
 ## Health, metrics, and logs
 
-Both executables emit JSON structured logs and expose:
+Both executables emit JSON structured logs. Set `LOG_LEVEL=debug` to include
+updater batch flushes plus tierer chunk reads, mutation decisions, and budget
+decisions. Both executables expose:
 
 - `GET /livez`: process liveness only;
 - `GET /readyz`: dependency readiness (Redis for updater; Redis and MinIO for
