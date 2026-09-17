@@ -15,12 +15,13 @@ type Config struct {
 	InstanceID      string
 	AccessRetention time.Duration
 
-	ListenAddress string
-	RedisAddress  string
-	RedisUsername string
-	RedisPassword string
-	RedisDB       int
-	RedisTLS      bool
+	ListenAddress        string
+	MetricsListenAddress string
+	RedisAddress         string
+	RedisUsername        string
+	RedisPassword        string
+	RedisDB              int
+	RedisTLS             bool
 
 	SuccessStatus int
 	FailureStatus int
@@ -64,6 +65,15 @@ func LoadConfig(lookup envLookup) (Config, error) {
 	config.RedisAddress = value(lookup, "REDIS_ADDR", "127.0.0.1:6379")
 	if err := validateAddress("UPDATER_LISTEN_ADDR", config.ListenAddress, true); err != nil {
 		return Config{}, err
+	}
+	config.MetricsListenAddress = value(lookup, "UPDATER_METRICS_LISTEN_ADDR", "")
+	if config.MetricsListenAddress != "" {
+		if err := validateAddress("UPDATER_METRICS_LISTEN_ADDR", config.MetricsListenAddress, true); err != nil {
+			return Config{}, err
+		}
+		if listenAddressesOverlap(config.ListenAddress, config.MetricsListenAddress) {
+			return Config{}, errors.New("UPDATER_METRICS_LISTEN_ADDR must not overlap UPDATER_LISTEN_ADDR")
+		}
 	}
 	if err := validateAddress("REDIS_ADDR", config.RedisAddress, false); err != nil {
 		return Config{}, err
@@ -246,7 +256,7 @@ func validateAddress(key, address string, allowEmptyHost bool) error {
 		return fmt.Errorf("%s must be a host:port address", key)
 	}
 	host, port, err := net.SplitHostPort(address)
-	if err != nil || (!allowEmptyHost && host == "") {
+	if err != nil || (!allowEmptyHost && host == "") || strings.ContainsAny(host, " \t\r\n/") {
 		return fmt.Errorf("%s must be a host:port address", key)
 	}
 	parsedPort, err := strconv.Atoi(port)
@@ -254,4 +264,21 @@ func validateAddress(key, address string, allowEmptyHost bool) error {
 		return fmt.Errorf("%s port must be between 1 and 65535", key)
 	}
 	return nil
+}
+
+// Compare validated addresses without DNS lookups. The listeners also surface
+// bind errors for aliases or interface conflicts that cannot be detected here.
+func listenAddressesOverlap(left, right string) bool {
+	leftHost, leftPort, _ := net.SplitHostPort(left)
+	rightHost, rightPort, _ := net.SplitHostPort(right)
+	leftNumber, _ := strconv.Atoi(leftPort)
+	rightNumber, _ := strconv.Atoi(rightPort)
+	if leftNumber != rightNumber {
+		return false
+	}
+	leftIP, rightIP := net.ParseIP(leftHost), net.ParseIP(rightHost)
+	if leftHost == "" || rightHost == "" || leftIP.IsUnspecified() || rightIP.IsUnspecified() {
+		return true
+	}
+	return strings.EqualFold(leftHost, rightHost) || (leftIP != nil && leftIP.Equal(rightIP))
 }
