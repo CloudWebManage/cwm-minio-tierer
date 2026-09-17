@@ -255,7 +255,7 @@ func newLifecycleServer() *lifecycleServer {
 	return &lifecycleServer{started: make(chan struct{}), stopped: make(chan struct{})}
 }
 
-func (s *lifecycleServer) ListenAndServe() error {
+func (s *lifecycleServer) ListenAndServe(context.Context) error {
 	close(s.started)
 	<-s.stopped
 	return http.ErrServerClosed
@@ -265,6 +265,11 @@ func (s *lifecycleServer) Shutdown(context.Context) error {
 	s.mu.Lock()
 	s.shutdown = true
 	s.mu.Unlock()
+	s.stopOnce.Do(func() { close(s.stopped) })
+	return nil
+}
+
+func (s *lifecycleServer) Close() error {
 	s.stopOnce.Do(func() { close(s.stopped) })
 	return nil
 }
