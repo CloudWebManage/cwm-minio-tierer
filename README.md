@@ -155,7 +155,8 @@ exactly `true` or `false`.
 | `INSTANCE_ID` | required | Stable ASCII letters/digits/dot/underscore/hyphen; namespaces all state. |
 | `ACCESS_RETENTION` | required | Positive whole-second duration; operationally greater than `max(low,high)+1h`. |
 | `LOG_LEVEL` | `info` | Shared structured log level: exactly `debug`, `info`, `warn`, or `error`. |
-| `UPDATER_LISTEN_ADDR` | `:8080` | HTTP listen `host:port`. |
+| `UPDATER_LISTEN_ADDR` | `:8080` | Ingestion HTTP listen `host:port`; also serves health and metrics. |
+| `UPDATER_METRICS_LISTEN_ADDR` | empty (disabled) | Optional separate health/metrics HTTP listen `host:port`, with numeric port 1–65535. Must not overlap the ingestion address. |
 | `REDIS_ADDR` | `127.0.0.1:6379` | Standalone Redis `host:port`. |
 | `REDIS_USERNAME` | empty | Optional Redis ACL username. |
 | `REDIS_PASSWORD` | empty | Optional Redis password. |
@@ -183,6 +184,29 @@ The API rejects unknown/duplicate fields, trailing JSON, malformed UTF-8,
 blank NDJSON records, empty identities/bodies, and unsupported media types. It
 validates the complete request before enqueueing and never splits one request
 across Redis batches.
+
+To expose monitoring while keeping ingestion on loopback, set:
+
+```text
+UPDATER_LISTEN_ADDR=127.0.0.1:8921
+UPDATER_METRICS_LISTEN_ADDR=0.0.0.0:8922
+```
+
+The separate listener serves only `GET /metrics`, `GET /livez`, and
+`GET /readyz` (including standard HTTP `HEAD` handling). It has no ingestion
+route: `POST /` returns 4xx, and monitoring requests never enqueue records or
+change ingestion request/record/rejection counters. Both listeners
+share the same metrics registry, batcher readiness, and Redis health check, and
+use the configured HTTP timeouts and header limit. Leaving the new variable
+unset or empty retains the single-listener behavior.
+
+Malformed addresses and obvious address overlaps (including same-port wildcard
+binds) are rejected during configuration. A bind or serving failure on either
+listener fails the service and shuts down both. Pending hostname resolution is
+canceled on parent cancellation or a peer failure. Both HTTP servers share one
+`UPDATER_SHUTDOWN_TIMEOUT` window; shutdown force-closes connections if that
+window expires, then gives accepted batches a separate drain window of the same
+duration before closing Redis.
 
 ## `minio-tierer` configuration
 
@@ -303,6 +327,19 @@ and mutation. `cwm_minio_tierer_cursor_age_seconds` is evaluated on every scrape
 as the non-negative age of the persisted cursor's `UpdatedAt`; it initializes
 from a resumed cursor and is zero when successful full-traversal completion has
 removed the cursor. No metric labels contain bucket or object names.
+
+`cwm_minio_tierer_scan_duration_seconds` retains its histogram name and
+`_bucket`, `_sum`, and `_count` series. Its finite bucket boundaries in seconds
+are `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120,
+300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400`, followed by `+Inf`.
+This covers subsecond scans through minutes, hours, and one day instead of
+capping histogram quantiles at ten seconds. Durations are recorded when scan
+attempts finish, including failures; an active scan has no duration observation
+until it finishes. For example, a one-day p95 of scan attempts is:
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(cwm_minio_tierer_scan_duration_seconds_bucket[1d])))
+```
 
 Alert at minimum on prolonged readiness failure, rising Redis/batch/dependency
 errors, stale successful-batch/scan timestamps, cursor errors or excessive age,

@@ -170,6 +170,7 @@ func TestRedisStoreAtomicallyReservesDailyAttemptAndByteBudgets(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 23, 59, 0, 0, time.FixedZone("UTC-4", -4*60*60))
+	server.SetTime(now)
 	limit := BudgetLimit{Attempts: 1, Bytes: 10}
 
 	var wg sync.WaitGroup
@@ -212,6 +213,7 @@ func TestRedisStoreRenewalReservesAttemptAndZeroBytesWithoutRefund(t *testing.T)
 	t.Cleanup(func() { _ = client.Close() })
 	store := NewRedisStore(NewRedisClient(client), "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC)
+	server.SetTime(now)
 	limit := BudgetLimit{Attempts: 2, Bytes: 5}
 	for i := 0; i < 2; i++ {
 		result, err := store.Reserve(context.Background(), now, BudgetRestore, limit, 0)
@@ -239,6 +241,7 @@ func TestRedisStoreAllowsUnlimitedBudgets(t *testing.T) {
 	commands := &countingRedisCommands{redisCommands: NewRedisClient(client)}
 	store := NewRedisStore(commands, "site-a", "coverage:2006:01:02:15", "complete", true)
 	now := time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC)
+	server.SetTime(now)
 
 	reservation, err := store.Reserve(context.Background(), now, BudgetTransition, BudgetLimit{}, 100)
 	if err != nil || !reservation.Allowed || commands.evals != 0 {

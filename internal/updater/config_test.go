@@ -161,3 +161,59 @@ func mapLookup(values map[string]string) func(string) (string, bool) {
 		return value, ok
 	}
 }
+
+func TestLoadConfigRejectsInvalidMetricsListener(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, ingestion, metrics string
+	}{
+		{"missing port", "127.0.0.1:8921", "127.0.0.1"},
+		{"URL", "127.0.0.1:8921", "http://127.0.0.1:8922"},
+		{"whitespace", "127.0.0.1:8921", " 127.0.0.1:8922"},
+		{"host whitespace", "127.0.0.1:8921", "bad host:8922"},
+		{"host path", "127.0.0.1:8921", "localhost/path:8922"},
+		{"zero port", "127.0.0.1:8921", "127.0.0.1:0"},
+		{"port out of range", "127.0.0.1:8921", ":65536"},
+		{"named port", "127.0.0.1:8921", ":http"},
+		{"same address", "127.0.0.1:8921", "127.0.0.1:8921"},
+		{"same numeric port", "127.0.0.1:8921", "127.0.0.1:08921"},
+		{"same IPv6 address", "[::1]:8921", "[0:0:0:0:0:0:0:1]:8921"},
+		{"wildcard ingestion", ":8921", "0.0.0.0:8921"},
+		{"wildcard metrics", "127.0.0.1:8921", "0.0.0.0:8921"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadConfig(mapLookup(map[string]string{
+				"INSTANCE_ID": "site-a", "ACCESS_RETENTION": "168h",
+				"UPDATER_LISTEN_ADDR": tt.ingestion, "UPDATER_METRICS_LISTEN_ADDR": tt.metrics,
+			}))
+			if err == nil || !strings.Contains(err.Error(), "UPDATER_METRICS_LISTEN_ADDR") {
+				t.Fatalf("LoadConfig() error = %v, want metrics listen address error", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfigOptionalMetricsListener(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, ingestion, metrics string
+		set                      bool
+	}{
+		{"unset", "127.0.0.1:8921", "", false},
+		{"empty", "127.0.0.1:8921", "", true},
+		{"separate public monitoring", "127.0.0.1:8921", "0.0.0.0:8922", true},
+		{"IPv6", "[::1]:8921", "[::]:8922", true},
+		{"distinct interfaces", "127.0.0.1:8921", "127.0.0.2:8921", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := map[string]string{"INSTANCE_ID": "site-a", "ACCESS_RETENTION": "168h", "UPDATER_LISTEN_ADDR": tt.ingestion}
+			if tt.set {
+				env["UPDATER_METRICS_LISTEN_ADDR"] = tt.metrics
+			}
+			config, err := LoadConfig(mapLookup(env))
+			if err != nil || config.MetricsListenAddress != tt.metrics || config.ListenAddress != tt.ingestion {
+				t.Fatalf("listen addresses = ingestion:%q metrics:%q, error = %v", config.ListenAddress, config.MetricsListenAddress, err)
+			}
+		})
+	}
+}

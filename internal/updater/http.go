@@ -27,13 +27,24 @@ type HTTPHandler struct {
 
 func NewHTTPHandler(config Config, batcher *Batcher, health HealthChecker, metrics *Metrics, clock func() time.Time, logger *slog.Logger) http.Handler {
 	h := &HTTPHandler{config: config, batcher: batcher, health: health, metrics: metrics, clock: clock, logger: logger}
-	mux := http.NewServeMux()
+	mux := h.monitoringMux()
 	mux.HandleFunc("POST /{$}", h.ingest)
-	mux.HandleFunc("GET /livez", h.liveness)
-	mux.HandleFunc("GET /readyz", h.readiness)
-	mux.Handle("GET /metrics", metrics.Handler())
 	h.handler = mux
 	return h
+}
+
+// NewMetricsHTTPHandler has no ingestion route or ingestion middleware.
+func NewMetricsHTTPHandler(config Config, batcher *Batcher, health HealthChecker, metrics *Metrics) http.Handler {
+	h := &HTTPHandler{config: config, batcher: batcher, health: health, metrics: metrics}
+	return h.monitoringMux()
+}
+
+func (h *HTTPHandler) monitoringMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /livez", h.liveness)
+	mux.HandleFunc("GET /readyz", h.readiness)
+	mux.Handle("GET /metrics", h.metrics.Handler())
+	return mux
 }
 
 func (h *HTTPHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {

@@ -42,9 +42,13 @@ func newMetrics(registry *prometheus.Registry, now func() time.Time) *Metrics {
 		now = time.Now
 	}
 	m := &Metrics{
-		registry:               registry,
-		scans:                  prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "scans_total", Help: "Full scan traversals by result."}, []string{"result"}),
-		scanDuration:           prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNamespace, Name: "scan_duration_seconds", Help: "Full scan traversal duration.", Buckets: prometheus.DefBuckets}),
+		registry: registry,
+		scans:    prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "scans_total", Help: "Full scan traversals by result."}, []string{"result"}),
+		scanDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: metricsNamespace, Name: "scan_duration_seconds", Help: "Full scan traversal duration.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+				30, 60, 120, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
+		}),
 		objects:                prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "objects_total", Help: "Objects handled by bounded outcome."}, []string{"outcome"}),
 		coverageSkips:          prometheus.NewCounter(prometheus.CounterOpts{Namespace: metricsNamespace, Name: "coverage_skips_total", Help: "Low decisions skipped because coverage was incomplete."}),
 		now:                    now,
